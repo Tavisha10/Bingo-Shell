@@ -97,6 +97,8 @@ func runCD(args []string) {
 		return
 	}
 	prevDir = current
+	// auto-load .env if present
+	envManager.AutoLoad(target)
 }
 
 // ---------- External command execution ----------
@@ -329,6 +331,12 @@ func executeLine(line string) bool {
 		return true
 	case "history":
 		runHistoryCmd(tokens[1:])
+		return true
+	case "env":
+		runEnvCmd(tokens[1:])
+		return true
+	case "tree":
+		runTreeCmd(tokens[1:])
 		return true
 	}
 
