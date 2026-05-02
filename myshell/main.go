@@ -47,22 +47,26 @@ func loadHistory() {
 // prompt
 
 func getPrompt() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = "?"
-	}
-	home, _ := os.UserHomeDir()
-	display := strings.Replace(cwd, home, "~", 1)
-
-	// Detect project and show type in prompt
-	project := DetectProject(cwd)
-	projectTag := ""
-	if project.Type != ProjectUnknown {
-		projectTag = fmt.Sprintf("\033[0;33m%s\033[0m ", project.Type.Emoji())
-	}
-
-	return fmt.Sprintf("\033[1;36m%s\033[0m %s\033[1;32m❯\033[0m ", display, projectTag)
+	return BuildPrompt()
 }
+
+// func getPrompt() string {
+// 	cwd, err := os.Getwd()
+// 	if err != nil {
+// 		cwd = "?"
+// 	}
+// 	home, _ := os.UserHomeDir()
+// 	display := strings.Replace(cwd, home, "~", 1)
+
+// 	// Detect project and show type in prompt
+// 	project := DetectProject(cwd)
+// 	projectTag := ""
+// 	if project.Type != ProjectUnknown {
+// 		projectTag = fmt.Sprintf("\033[0;33m%s\033[0m ", project.Type.Emoji())
+// 	}
+
+// 	return fmt.Sprintf("\033[1;36m%s\033[0m %s\033[1;32m❯\033[0m ", display, projectTag)
+// }
 
 // Built-in commands
 
@@ -82,14 +86,14 @@ func runCD(args []string) {
 		target = prevDir
 		fmt.Println(target)
 	} else {
-		target = args[0]
+		target = NormalizePath(args[0])
 		// expand ~ to home directory
-		if target == "~" {
-			target, _ = os.UserHomeDir()
-		} else if len(target) > 1 && target[:2] == "~/" {
-			home, _ := os.UserHomeDir()
-			target = home + target[1:]
-		}
+		// if target == "~" {
+		// 	target, _ = os.UserHomeDir()
+		// } else if len(target) > 1 && target[:2] == "~/" {
+		// 	home, _ := os.UserHomeDir()
+		// 	target = home + target[1:]
+		// }
 	}
 
 	if err := os.Chdir(target); err != nil {
@@ -99,6 +103,8 @@ func runCD(args []string) {
 	prevDir = current
 	// auto-load .env if present
 	envManager.AutoLoad(target)
+	project := DetectProject(target)
+	autoRunner.OnDirChange(target, project)
 }
 
 // ---------- External command execution ----------
@@ -338,6 +344,27 @@ func executeLine(line string) bool {
 	case "tree":
 		runTreeCmd(tokens[1:])
 		return true
+	case "tools":
+		runToolsCmd(tokens[1:])
+		return true
+	case "platform":
+		runPlatformCmd(tokens[1:])
+		return true
+	case "clear":
+		ClearScreen()
+		return true
+	case "explore":
+		runExploreCmd(tokens[1:])
+		return true
+	case "highlight":
+		runHighlightCmd(tokens[1:])
+		return true
+	case "render":
+		runRenderCmd(tokens[1:])
+		return true
+	case "status":
+		runStatusCmd(tokens[1:])
+		return true
 	}
 
 	// Split on pipes and run
@@ -368,6 +395,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "warning: history db failed:", err)
 	}
 	defer historyDB.Close()
+
+	InitPlatform()
 
 	rl, err := readline.NewEx(&readline.Config{
 		HistoryFile:         historyFile,
