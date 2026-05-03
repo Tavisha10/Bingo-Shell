@@ -47,22 +47,26 @@ func loadHistory() {
 // prompt
 
 func getPrompt() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = "?"
-	}
-	home, _ := os.UserHomeDir()
-	display := strings.Replace(cwd, home, "~", 1)
-
-	// Detect project and show type in prompt
-	project := DetectProject(cwd)
-	projectTag := ""
-	if project.Type != ProjectUnknown {
-		projectTag = fmt.Sprintf("\033[0;33m%s\033[0m ", project.Type.Emoji())
-	}
-
-	return fmt.Sprintf("\033[1;36m%s\033[0m %s\033[1;32m❯\033[0m ", display, projectTag)
+	return BuildPrompt()
 }
+
+// func getPrompt() string {
+// 	cwd, err := os.Getwd()
+// 	if err != nil {
+// 		cwd = "?"
+// 	}
+// 	home, _ := os.UserHomeDir()
+// 	display := strings.Replace(cwd, home, "~", 1)
+
+// 	// Detect project and show type in prompt
+// 	project := DetectProject(cwd)
+// 	projectTag := ""
+// 	if project.Type != ProjectUnknown {
+// 		projectTag = fmt.Sprintf("\033[0;33m%s\033[0m ", project.Type.Emoji())
+// 	}
+
+// 	return fmt.Sprintf("\033[1;36m%s\033[0m %s\033[1;32m❯\033[0m ", display, projectTag)
+// }
 
 // Built-in commands
 
@@ -82,14 +86,14 @@ func runCD(args []string) {
 		target = prevDir
 		fmt.Println(target)
 	} else {
-		target = args[0]
+		target = NormalizePath(args[0])
 		// expand ~ to home directory
-		if target == "~" {
-			target, _ = os.UserHomeDir()
-		} else if len(target) > 1 && target[:2] == "~/" {
-			home, _ := os.UserHomeDir()
-			target = home + target[1:]
-		}
+		// if target == "~" {
+		// 	target, _ = os.UserHomeDir()
+		// } else if len(target) > 1 && target[:2] == "~/" {
+		// 	home, _ := os.UserHomeDir()
+		// 	target = home + target[1:]
+		// }
 	}
 
 	if err := os.Chdir(target); err != nil {
@@ -97,6 +101,11 @@ func runCD(args []string) {
 		return
 	}
 	prevDir = current
+	// auto-load .env if present
+	envManager.AutoLoad(target)
+	project := DetectProject(target)
+	autoRunner.OnDirChange(target, project)
+	FireCD(target)
 }
 
 // ---------- External command execution ----------
@@ -320,6 +329,12 @@ func executeLine(line string) bool {
 		return true
 	}
 
+	// resolve aliases
+	if expanded, ok := resolveAlias(tokens[0]); ok {
+		tokens = tokenize(expanded)
+		tokens = expandEnv(tokens)
+	}
+
 	// Built-ins (must run in shell process, not subprocess)
 	switch tokens[0] {
 	case "exit":
@@ -329,6 +344,45 @@ func executeLine(line string) bool {
 		return true
 	case "history":
 		runHistoryCmd(tokens[1:])
+		return true
+	case "env":
+		runEnvCmd(tokens[1:])
+		return true
+	case "tree":
+		runTreeCmd(tokens[1:])
+		return true
+	case "tools":
+		runToolsCmd(tokens[1:])
+		return true
+	case "platform":
+		runPlatformCmd(tokens[1:])
+		return true
+	case "clear":
+		ClearScreen()
+		return true
+	case "explore":
+		runExploreCmd(tokens[1:])
+		return true
+	case "highlight":
+		runHighlightCmd(tokens[1:])
+		return true
+	case "render":
+		runRenderCmd(tokens[1:])
+		return true
+	case "status":
+		runStatusCmd(tokens[1:])
+		return true
+	case "config":
+		runConfigCmd(tokens[1:])
+		return true
+	case "session":
+		runSessionCmd(tokens[1:])
+		return true
+	case "hooks":
+		runHooksCmd(tokens[1:])
+		return true
+	case "help":
+		runHelpCmd(tokens[1:])
 		return true
 	}
 
@@ -352,14 +406,25 @@ func expandEnv(tokens []string) []string {
 // ---------- Main REPL ----------
 
 func main() {
-	home, _ := os.UserHomeDir()
-	historyFile := filepath.Join(home, ".myshell_history")
-
-	// Init SQLite history
+	// init all modules in order
+	InitPlatform()
+	if err := InitConfig(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: config failed:", err)
+	}
+	ApplyConfig()
 	if err := InitHistory(); err != nil {
 		fmt.Fprintln(os.Stderr, "warning: history db failed:", err)
 	}
+	WriteExampleHooks()
+	LoadHooksFromDir()
+	InitSession()
+	FireStartup()
+	defer FireExit()
+	defer SaveSession()
 	defer historyDB.Close()
+
+	home, _ := os.UserHomeDir()
+	historyFile := filepath.Join(home, ".myshell_history")
 
 	rl, err := readline.NewEx(&readline.Config{
 		HistoryFile:         historyFile,
@@ -368,6 +433,7 @@ func main() {
 		InterruptPrompt:     "^C",
 		EOFPrompt:           "exit",
 		ForceUseInteractive: true,
+		AutoComplete:        BuildCompleter(),
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "readline init error:", err)
@@ -375,7 +441,7 @@ func main() {
 	}
 	defer rl.Close()
 
-	fmt.Println("myshell 0.3 — SQLite history · project detection")
+	fmt.Println("myshell 0.6 — config · session · hooks")
 
 	for {
 		rl.SetPrompt(getPrompt())
@@ -393,12 +459,13 @@ func main() {
 
 		addToHistory(line)
 
-		// Save to SQLite with context
 		cwd, _ := os.Getwd()
 		project := DetectProject(cwd)
 		if historyDB != nil {
 			historyDB.Add(line, cwd, string(project.Type), 0)
 		}
+
+		FireCmd(line)
 
 		if !executeLine(line) {
 			fmt.Println("Bye!")
