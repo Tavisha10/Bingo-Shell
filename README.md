@@ -60,7 +60,7 @@ A fully featured, cross-platform command-line shell built from scratch in Go.
 
 ```bash
 # clone the repo
-git clone https://github.com/yourusername/myshell.git
+git clone https://github.com/Tavisha10/Bingo-Shell.git
 cd myshell
 
 # install
